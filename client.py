@@ -1,4 +1,4 @@
-# client.py --- Klien Kios untuk Pembuatan Kunci KDF & Penandatanganan Transaksi
+# client.py --- Klien Kios untuk Pembuatan Kunci KDF & Penandatanganan Transaksi (Support Mempool)
 import json
 import sys
 import time
@@ -47,7 +47,7 @@ def panggil(url, data=None):
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Penggunaan: python client.py [transaksi|chain|resolve|kuota] [alamat_node] [argumen_lain...]")
+        print("Penggunaan: python client.py [transaksi|mine|chain|resolve|kuota] [alamat_node] [argumen_lain...]")
         sys.exit(1)
 
     perintah = sys.argv[1]
@@ -87,15 +87,26 @@ if __name__ == "__main__":
         }
 
         try:
-            hasil = panggil(f"{alamat}/mine", {"transaction": tx_obj})
-            print(f"Sukses! {hasil['pesan']} pada Blok #{hasil['block']['index']}")
+            # Mengirim ke endpoint Mempool (/transactions/new)
+            hasil = panggil(f"{alamat}/transactions/new", {"transaction": tx_obj})
+            print(f"Sukses! {hasil['pesan']}. Total Mempool saat ini: {hasil['mempool_size']} transaksi.")
         except Exception as e:
-            print(f"Gagal Menambang/Mengesahkan Blok: {e}")
+            print(f"Gagal Mengirim Transaksi ke Mempool: {e}")
+
+    elif perintah == "mine":
+        # Perintah untuk menambang seluruh antrean mempool menjadi 1 blok baru (Batch Mining)
+        try:
+            hasil = panggil(f"{alamat}/mine", {})
+            print(f"Sukses! {hasil['pesan']} pada Blok #{hasil['block']['index']} (Validator: {hasil['block']['validator_id']})")
+            print(f"Merkle Root : {hasil['block']['merkle_root']}")
+            print(f"State Root  : {hasil['block']['state_root']}")
+        except Exception as e:
+            print(f"Gagal Menambang Blok dari Mempool: {e}")
 
     elif perintah == "chain":
         try:
             hasil = panggil(f"{alamat}/chain")
-            print(f"Panjang Rantai e-RDKK: {hasil['panjang']} Blok")
+            print(f"Panjang Rantai e-RDKK: {hasil['panjang']} Blok | Mempool Aktif: {hasil.get('mempool_size', 0)} transaksi")
             for b in hasil["chain"]:
                 print(f"  - Blok #{b['index']} | Validator: {b['validator_id']} | Transaksi: {b['transactions_data']}")
         except Exception as e:
