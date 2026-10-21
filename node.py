@@ -16,6 +16,7 @@ PEERS = []
 CHAIN = []
 MEMPOOL = []  # Antrean transaksi sementara sebelum masuk blok (Batch Mining)
 DIFFICULTY = 3  # Target: Hash harus diawali dengan '000'
+NODE_IDENTITY = "VAL_KEMENTAN" # Default, akan di-override dari argumen
 
 VALIDATORS_ORDER = ["VAL_KEMENTAN", "VAL_PT_PUPUK", "VAL_DINAS_PERTANIAN"]
 VALIDATOR_PUB_KEYS_HEX = {}
@@ -150,6 +151,7 @@ def genesis_block():
         "7201002": {"nama": "Pak Farmer B", "sisa_kuota_kg": 100}
     }
     b = Block(0, [db_kuota_pemerintah], "VAL_KEMENTAN", previous_hash="0"*64, nonce=0, chain_context=None)
+    b.timestamp = 0  # PERBAIKAN: Genesis Block timestamp deterministik
     b.state_root = hashlib.sha256(json.dumps(db_kuota_pemerintah, sort_keys=True).encode('utf-8')).hexdigest()
     
     sig = VALIDATOR_PRIV_KEYS["VAL_KEMENTAN"].sign(b.compute_hash().encode('utf-8'), ec.ECDSA(hashes.SHA256()))
@@ -219,8 +221,9 @@ def broadcast_block(block_dict):
                 data = json.dumps(block_dict).encode("utf-8")
                 req = urllib.request.Request(f"http://{peer}/block", data=data, headers={"Content-Type": "application/json"}, method="POST")
                 urllib.request.urlopen(req, timeout=3)
-            except Exception:
-                pass
+                print(f"[{PORT}] [CP10] Berhasil broadcast Block #{block_dict['index']} ke peer {peer}")
+            except Exception as e:
+                print(f"[{PORT}] [CP10] Gagal broadcast ke peer {peer}: {e}")
     threading.Thread(target=_send).start()
 
 def broadcast_tx(tx_dict):
@@ -242,7 +245,8 @@ def resolve_conflicts():
             req = urllib.request.Request(f"http://{peer}/chain")
             with urllib.request.urlopen(req, timeout=3) as res:
                 kandidat = json.loads(res.read().decode("utf-8"))["chain"]
-                if len(kandidat) > len(terpanjang) and is_chain_valid(kandidat):
+                # PERBAIKAN: Gunakan >= agar rantai sama panjang bisa menggantikan (asalkan valid)
+                if len(kandidat) >= len(terpanjang) and is_chain_valid(kandidat):
                     terpanjang = kandidat
                     berubah = True
         except Exception:
@@ -256,7 +260,6 @@ def get_simulated_state_with_mempool():
     """Menghitung state berjalan termasuk memperhitungkan transaksi yang masih ada di mempool."""
     temp_chain_sim = list(CHAIN)
     if MEMPOOL:
-        # Simulasi blok sementara untuk menguji validitas kuota bertumpuk di mempool
         dummy_block_data = {'index': len(CHAIN), 'transactions_data': list(MEMPOOL), 'validator_id': 'SIM', 'previous_hash': '0', 'nonce': 0}
         temp_chain_sim.append(dummy_block_data)
     return get_state_at_chain(temp_chain_sim)
@@ -338,7 +341,7 @@ class NodeHandler(BaseHTTPRequestHandler):
             next_index = induk["index"] + 1
             expected_val = get_scheduled_validator(next_index)
             
-            if expected_val not in VALIDATOR_PRIV_KEYS:
+            if expected_val != NODE_IDENTITY:
                 self._balas(403, {"error": f"Node ini bukan giliran validator {expected_val}!"})
                 return
 
@@ -387,7 +390,10 @@ class NodeHandler(BaseHTTPRequestHandler):
             if is_chain_valid(temp_incoming_chain):
                 CHAIN.append(block_dict)
                 incoming_txs = block_dict['transactions_data']
-                MEMPOOL = [tx for tx in MEMPOOL if tx not in incoming_txs]
+                # Perbaikan: Bersihkan Mempool berdasarkan signature_petani
+                incoming_ids = {tx['signature_petani'] for tx in incoming_txs}
+                MEMPOOL = [tx for tx in MEMPOOL if tx['signature_petani'] not in incoming_ids]
+                
                 print(f"[{PORT}] [CP10] Blok #{block_dict['index']} diterima via broadcast & Mempool dibersihkan.")
                 self._balas(200, {"pesan": "Blok diterima"})
             else:
@@ -398,12 +404,16 @@ class NodeHandler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Penggunaan: python node.py [PORT] [PEER_LIST]")
+        print("Penggunaan: python node.py [PORT] [PEER_LIST] [NODE_IDENTITY]")
         sys.exit(1)
         
     PORT = int(sys.argv[1])
     if len(sys.argv) > 2 and sys.argv[2]:
         PEERS = sys.argv[2].split(",")
+        
+    # Tambahan: Ambil identitas validator dari argumen ke-3
+    if len(sys.argv) > 3:
+        NODE_IDENTITY = sys.argv[3]
 
     for v_name in VALIDATORS_ORDER:
         salt = b"erdkk_consensus_salt_secure_2026"
@@ -416,5 +426,5 @@ if __name__ == "__main__":
         VALIDATOR_PUB_KEYS_HEX[v_name] = get_public_key_hex(priv.public_key())
 
     CHAIN.append(genesis_block().to_dict())
-    print(f"Node Validator Aktif di Port {PORT} dengan Mempool, Merkle Batch, & PoW Ready.")
+    print(f"Node Validator Aktif di Port {PORT} (Identitas: {NODE_IDENTITY}) dengan Mempool, Merkle Batch, & PoW Ready.")
     HTTPServer(("0.0.0.0", PORT), NodeHandler).serve_forever()
