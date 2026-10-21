@@ -1,9 +1,10 @@
-# client.py --- Klien Kios untuk Pembuatan Kunci KDF & Penandatanganan Transaksi (Support Mempool)
+# client.py --- Klien Kios untuk Pembuatan Kunci KDF & Penandatanganan Transaksi (Final dengan Log Checkpoint)
 import json
 import sys
 import time
 import gc
 import urllib.request
+import urllib.error
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -47,7 +48,7 @@ def panggil(url, data=None):
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Penggunaan: python client.py [transaksi|mine|chain|resolve|kuota] [alamat_node] [argumen_lain...]")
+        print("Penggunaan: py client.py [transaksi|mine|chain|resolve|kuota] [alamat_node] [argumen_lain...]")
         sys.exit(1)
 
     perintah = sys.argv[1]
@@ -57,7 +58,7 @@ if __name__ == "__main__":
 
     if perintah == "transaksi":
         if len(sys.argv) < 7:
-            print("Format salah. Contoh: python client.py transaksi localhost:5001 7201001 123456 40 KIOS_PALU_01")
+            print("Format salah. Contoh: py client.py transaksi localhost:5001 7201001 123456 40 KIOS_PALU_01")
             sys.exit(1)
             
         nik = sys.argv[3]
@@ -66,11 +67,25 @@ if __name__ == "__main__":
         kios_id = sys.argv[6]
         timestamp = time.time()
 
+        # ==========================================
+        # CHECKPOINT 1: PEMBUATAN IDENTITAS PENGIRIM
+        # ==========================================
         priv_k, pub_k = derive_ecc_keypair_from_pin(nik, pin)
         payload = f"{nik}:{jumlah}:{kios_id}:{timestamp}"
         
         sig = sign_data_ecc(priv_k, payload)
         pub_hex = get_public_key_hex(pub_k)
+
+        print(f"\n[CP1] Identitas Petani Berhasil Dibuat via KDF (PBKDF2)")
+        print(f"[CP1] Alamat Pengirim (Public Key): {pub_hex[:50]}...")
+        print(f"[CP1] Private Key disimpan sementara di RAM (Ephemeral).")
+
+        # ==========================================
+        # CHECKPOINT 2: TRANSAKSI DIBUAT & DITANDATANGANI
+        # ==========================================
+        print(f"\n[CP2] Transaksi Dibuat: NIK {nik} menebus {jumlah} kg di {kios_id}")
+        print(f"[CP2] Payload ditandatangani: {payload}")
+        print(f"[CP2] Potongan Signature Petani: {sig[:60]}...")
 
         del priv_k
         del pub_k
@@ -89,12 +104,26 @@ if __name__ == "__main__":
         try:
             # Mengirim ke endpoint Mempool (/transactions/new)
             hasil = panggil(f"{alamat}/transactions/new", {"transaction": tx_obj})
-            print(f"Sukses! {hasil['pesan']}. Total Mempool saat ini: {hasil['mempool_size']} transaksi.")
+            print(f"[CP3] Verifikasi Signature di Node: BERHASIL (Sah).")
+            print(f"[CP4] Sukses! {hasil['pesan']}. Total di Mempool: {hasil['mempool_size']} transaksi.\n")
         except Exception as e:
-            print(f"Gagal Mengirim Transaksi ke Mempool: {e}")
+            print(f"[CP3] Verifikasi Signature di Node: GAGAL / DITOLAK. Alasan: {e}\n")
+            
+        # ==========================================
+        # SIMULASI CHECKPOINT 3 (MANIPULASI DATA)
+        # ==========================================
+        print("=== SIMULASI SERANGAN: MENGUBAH DATA SETELAH DITANDATANGANI ===")
+        tampered_tx = tx_obj.copy()
+        tampered_tx['jumlah_kg'] = 9999 # Mengubah jumlah kg
+        print(f"Mengubah jumlah dari {jumlah} kg menjadi {tampered_tx['jumlah_kg']} kg...")
+        
+        try:
+            panggil(f"{alamat}/transactions/new", {"transaction": tampered_tx})
+            print("[CP3 GAGAL] Node menerima transaksi palsu! (Periksa logika verifikasi node)")
+        except urllib.error.HTTPError as e:
+            print(f"[CP3 SUKSES] Node menolak transaksi yang dimanipulasi dengan alasan: {e.reason}")
 
     elif perintah == "mine":
-        # Perintah untuk menambang seluruh antrean mempool menjadi 1 blok baru (Batch Mining)
         try:
             hasil = panggil(f"{alamat}/mine", {})
             print(f"Sukses! {hasil['pesan']} pada Blok #{hasil['block']['index']} (Validator: {hasil['block']['validator_id']})")
@@ -121,7 +150,7 @@ if __name__ == "__main__":
 
     elif perintah == "kuota":
         if len(sys.argv) < 4:
-            print("Format salah. Contoh: python client.py kuota localhost:5001 7201001")
+            print("Format salah. Contoh: py client.py kuota localhost:5001 7201001")
             sys.exit(1)
             
         nik = sys.argv[3]

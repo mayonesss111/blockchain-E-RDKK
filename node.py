@@ -1,4 +1,4 @@
-# node.py --- Node Validator e-RDKK dengan PoA, Mempool, Merkle Tree Root, State Root, & Broadcast
+# node.py --- Node Validator e-RDKK dengan PoA, Mempool, Merkle Tree Root, State Root, Broadcast, & Proof of Work
 import hashlib
 import json
 import sys
@@ -15,6 +15,7 @@ PORT = 0
 PEERS = []
 CHAIN = []
 MEMPOOL = []  # Antrean transaksi sementara sebelum masuk blok (Batch Mining)
+DIFFICULTY = 3  # Target: Hash harus diawali dengan '000'
 
 VALIDATORS_ORDER = ["VAL_KEMENTAN", "VAL_PT_PUPUK", "VAL_DINAS_PERTANIAN"]
 VALIDATOR_PUB_KEYS_HEX = {}
@@ -125,6 +126,19 @@ class Block:
         payload = self.get_block_header().encode('utf-8')
         return hashlib.sha256(payload).hexdigest()
 
+    def mine_block(self, difficulty):
+        """Fungsi Proof of Work: Mencari nonce sampai hash memenuhi target difficulty."""
+        target = '0' * difficulty
+        attempts = 0
+        start_time = time.time()
+        
+        while self.compute_hash()[:difficulty] != target:
+            self.nonce += 1
+            attempts += 1
+            
+        end_time = time.time()
+        return attempts, end_time - start_time
+
     def to_dict(self):
         d = self.to_dict_partial()
         d['signature_validator'] = self.signature_validator
@@ -173,6 +187,12 @@ def is_chain_valid(chain):
         if curr['merkle_root'] != computed_merkle:
             return False
 
+        # Cek Proof of Work (Checkpoint 11)
+        block_hash = b_obj.compute_hash()
+        if block_hash[:DIFFICULTY] != '0' * DIFFICULTY:
+            print(f"[CP11] Block #{curr['index']} DITOLAK: Proof of Work tidak valid!")
+            return False
+
         val_pub_hex = VALIDATOR_PUB_KEYS_HEX.get(curr['validator_id'])
         if not val_pub_hex:
             return False
@@ -188,6 +208,8 @@ def is_chain_valid(chain):
     if chain[-1]['state_root'] != expected_state_root:
         return False
 
+    # === CHECKPOINT 8: VALIDASI RANTAI NORMAL ===
+    print("[CP8] Validasi Rantai: VALID (Semua hash dan previous_hash cocok).")
     return True
 
 def broadcast_block(block_dict):
@@ -273,17 +295,14 @@ class NodeHandler(BaseHTTPRequestHandler):
         isi = json.loads(self.rfile.read(panjang) or b"{}")
 
         if self.path == "/transactions/new":
-            # Endpoint untuk menerima transaksi baru dan memasukkannya ke Mempool
             tx_data = isi.get("transaction", {})
             nik = tx_data.get('nik_petani')
             jumlah_diminta = tx_data.get('jumlah_kg', 0)
 
-            # Cek apakah transaksi yang sama persis sudah ada di Mempool (mencegah loop broadcast)
             if tx_data in MEMPOOL:
                 self._balas(200, {"pesan": "Transaksi sudah ada di mempool", "mempool_size": len(MEMPOOL)})
                 return
 
-            # Cek kuota berdasarkan chain + mempool yang sudah antre
             simulated_state = get_simulated_state_with_mempool()
             if nik not in simulated_state:
                 self._balas(400, {"error": "NIK Petani tidak terdaftar di sistem kuota subsidi!"})
@@ -294,7 +313,6 @@ class NodeHandler(BaseHTTPRequestHandler):
                 self._balas(400, {"error": f"Ditolak! Kuota tidak cukup di mempool. Sisa: {sisa_kuota} kg"})
                 return
 
-            # Verifikasi tanda tangan ECC petani
             payload_str = f"{nik}:{jumlah_diminta}:{tx_data['kios_id']}:{tx_data['timestamp']}"
             try:
                 farmer_pub_key = get_public_key_from_hex(tx_data['public_key_petani_hex'])
@@ -306,14 +324,12 @@ class NodeHandler(BaseHTTPRequestHandler):
                 return
 
             MEMPOOL.append(tx_data)
-            print(f"[{PORT}] Transaksi baru dari NIK {nik} masuk ke Mempool. Total di Mempool: {len(MEMPOOL)}")
+            print(f"[{PORT}] [CP4] Transaksi baru dari NIK {nik} masuk ke Mempool. Total di Mempool: {len(MEMPOOL)}")
             
-            # Broadcast transaksi mentah ke peer agar mempool tersinkronisasi
             broadcast_tx({"transaction": tx_data})
             self._balas(201, {"pesan": "Transaksi berhasil dimasukkan ke Mempool", "mempool_size": len(MEMPOOL)})
 
         elif self.path == "/mine":
-            # Endpoint untuk memproses seluruh transaksi di Mempool menjadi 1 Blok baru (Batch Mining)
             if not MEMPOOL:
                 self._balas(400, {"error": "Mempool kosong, tidak ada transaksi untuk ditambang!"})
                 return
@@ -326,8 +342,8 @@ class NodeHandler(BaseHTTPRequestHandler):
                 self._balas(403, {"error": f"Node ini bukan giliran validator {expected_val}!"})
                 return
 
-            # Ambil semua transaksi dari Mempool untuk dibentuk Batch Merkle Tree
             batch_transactions = list(MEMPOOL)
+            print(f"\n[{PORT}] [CP5] Block Candidate dibentuk dari {len(batch_transactions)} transaksi di Mempool.")
 
             prev_block_obj = Block(induk['index'], induk['transactions_data'], induk['validator_id'], induk['previous_hash'], induk['nonce'])
             prev_block_obj.timestamp = induk['timestamp']
@@ -335,26 +351,32 @@ class NodeHandler(BaseHTTPRequestHandler):
             prev_block_obj.state_root = induk['state_root']
             prev_hash = prev_block_obj.compute_hash()
 
-            # Buat blok baru dengan sekumpulan transaksi batch
             block = Block(
                 index=next_index,
                 transactions_data=batch_transactions,
                 validator_id=expected_val,
                 previous_hash=prev_hash,
-                nonce=next_index,
+                nonce=0,
                 chain_context=CHAIN
             )
+            
+            print(f"[CP6] Memulai Proof of Work (Difficulty: {DIFFICULTY})...")
+            attempts, duration = block.mine_block(DIFFICULTY)
+            print(f"[CP6] PoW Selesai! Percobaan nonce: {attempts}")
+            print(f"[CP6] Nonce ditemukan: {block.nonce}")
+            print(f"[CP6] Hash Block: {block.compute_hash()}")
+            print(f"[CP6] Waktu penambangan: {duration:.4f} detik")
             
             sig_val = VALIDATOR_PRIV_KEYS[expected_val].sign(block.compute_hash().encode('utf-8'), ec.ECDSA(hashes.SHA256()))
             block.signature_validator = sig_val.hex()
             
             block_dict = block.to_dict()
             CHAIN.append(block_dict)
+            is_chain_valid(CHAIN)  # Memicu validasi dan log [CP8]
             
-            # Kosongkan mempool setelah berhasil ditambang
             MEMPOOL.clear()
             
-            print(f"[{PORT}] Blok Batched #{next_index} berhasil ditambang oleh {expected_val} memuat {len(batch_transactions)} transaksi (Merkle Root & State Root secured)")
+            print(f"[CP7] Blok #{next_index} diterima rantai. Pool dikosongkan. Panjang rantai: {len(CHAIN)}\n")
             
             broadcast_block(block_dict)
             self._balas(201, {"pesan": "Batch blok berhasil ditambang", "block": block_dict})
@@ -364,14 +386,12 @@ class NodeHandler(BaseHTTPRequestHandler):
             temp_incoming_chain = CHAIN + [block_dict]
             if is_chain_valid(temp_incoming_chain):
                 CHAIN.append(block_dict)
-                # Bersihkan transaksi di mempool lokal yang sudah masuk ke blok dari node lain
                 incoming_txs = block_dict['transactions_data']
-                
                 MEMPOOL = [tx for tx in MEMPOOL if tx not in incoming_txs]
-                
-                print(f"[{PORT}] Blok #{block_dict['index']} diterima via broadcast & Mempool dibersihkan.")
+                print(f"[{PORT}] [CP10] Blok #{block_dict['index']} diterima via broadcast & Mempool dibersihkan.")
                 self._balas(200, {"pesan": "Blok diterima"})
             else:
+                print(f"[{PORT}] [CP11] Blok dari peer DITOLAK karena tidak valid!")
                 self._balas(409, {"pesan": "Blok ditolak / tidak valid"})
         else:
             self._balas(404, {"error": "Endpoint tidak dikenal"})
@@ -396,5 +416,5 @@ if __name__ == "__main__":
         VALIDATOR_PUB_KEYS_HEX[v_name] = get_public_key_hex(priv.public_key())
 
     CHAIN.append(genesis_block().to_dict())
-    print(f"Node Validator Aktif di Port {PORT} dengan Mempool & Merkle Batch Ready.")
+    print(f"Node Validator Aktif di Port {PORT} dengan Mempool, Merkle Batch, & PoW Ready.")
     HTTPServer(("0.0.0.0", PORT), NodeHandler).serve_forever()
