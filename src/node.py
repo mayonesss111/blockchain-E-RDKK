@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from core.block import Block
 from core.state import get_state_at_chain, compute_state_root
 from core.consensus import get_expected_validator, is_chain_valid, VALIDATORS_ORDER, DIFFICULTY
-from core.network import broadcast_block, broadcast_tx, resolve_conflicts
+from core.network import broadcast_block, broadcast_tx, resolve_conflicts, sync_mempool
 from core.crypto_utils import get_public_key_from_hex, get_public_key_hex, verify_signature_ecc
 
 PORT = 0
@@ -22,6 +22,8 @@ NODE_IDENTITY = "VAL_KEMENTAN"
 VALIDATOR_PUB_KEYS_HEX = {}
 VALIDATOR_PRIV_KEYS = {}
 SECP256R1_ORDER = 115792089210356248762697446949407573530086143415290314195533631308867097853951
+
+SLOT_DURATION = 10
 
 def genesis_block():
     db_kuota_pemerintah = {
@@ -58,18 +60,20 @@ class NodeHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/chain":
             self._balas(200, {"panjang": len(CHAIN), "chain": CHAIN, "mempool_size": len(MEMPOOL)})
+        elif self.path == "/mempool":
+             self._balas(200, {"mempool": MEMPOOL})
         elif self.path == "/resolve":
-            status_ubah = resolve_conflicts(CHAIN, PEERS, VALIDATOR_PUB_KEYS_HEX)
-            self._balas(200, {"rantai_diganti": status_ubah, "panjang": len(CHAIN)})
+             status_ubah = resolve_conflicts(CHAIN, PEERS, VALIDATOR_PUB_KEYS_HEX, SLOT_DURATION)
+             self._balas(200, {"rantai_diganti": status_ubah, "panjang": len(CHAIN)})
         elif self.path.startswith("/cek_kuota/"):
-            nik = self.path.split("/")[-1]
-            state = get_state_at_chain(CHAIN)
-            if nik in state:
+             nik = self.path.split("/")[-1]
+             state = get_state_at_chain(CHAIN)
+             if nik in state:
                 self._balas(200, {"nik_petani": nik, "sisa_kuota_kg": state[nik]['sisa_kuota_kg']})
-            else:
+             else:
                 self._balas(404, {"error": "NIK Petani tidak ditemukan."})
         else:
-            self._balas(404, {"error": "Endpoint tidak dikenal"})
+             self._balas(404, {"error": "Endpoint tidak dikenal"})
 
     def do_POST(self):
         global MEMPOOL
@@ -113,14 +117,27 @@ class NodeHandler(BaseHTTPRequestHandler):
 
         elif self.path == "/mine":
             if not MEMPOOL:
+               sync_mempool(MEMPOOL, PEERS)
+
+            if not MEMPOOL:
                 self._balas(400, {"error": "Mempool kosong, tidak ada transaksi untuk ditambang!"})
                 return
 
             induk = CHAIN[-1]
             next_index = induk["index"] + 1
+            prev_timestamp = induk['timestamp']
+
+            LIMIT_JEDA = (len(VALIDATORS_ORDER) // 2) + 1
+            start_check = max(0, len(CHAIN) - LIMIT_JEDA)
             
-            slot_duration=3
-            expected_val = get_expected_validator(slot_duration)
+            for k in range(start_check, len(CHAIN)):
+                if CHAIN[k]['validator_id'] == NODE_IDENTITY:
+                    self._balas(403, {
+                        "error": f"Ditolak! Node {NODE_IDENTITY} baru saja menerbitkan blok. Anda harus menunggu validator lain mengambil giliran."
+                    })
+                    return
+            
+            expected_val = get_expected_validator(next_index, prev_timestamp, SLOT_DURATION)
             
             if expected_val != NODE_IDENTITY:
                 self._balas(403, {
@@ -158,8 +175,8 @@ class NodeHandler(BaseHTTPRequestHandler):
             
             block_dict = block.to_dict()
 
-            temp_chain = CHAIN + [block_dict]
-            if not is_chain_valid(temp_chain, VALIDATOR_PUB_KEYS_HEX):
+            temp_chain = (CHAIN + [block_dict])
+            if not is_chain_valid(temp_chain, VALIDATOR_PUB_KEYS_HEX, SLOT_DURATION):
                 print(f"[{PORT}] Blok gagal ditambahkan karena validasi rantai gagal.")
                 self._balas(400, {"error": "Blok ditolak oleh aturan konsensus"})
                 return
@@ -175,7 +192,7 @@ class NodeHandler(BaseHTTPRequestHandler):
         elif self.path == "/block":
             block_dict = isi
             temp_incoming_chain = CHAIN + [block_dict]
-            if is_chain_valid(temp_incoming_chain, VALIDATOR_PUB_KEYS_HEX):
+            if is_chain_valid(temp_incoming_chain, VALIDATOR_PUB_KEYS_HEX, SLOT_DURATION):
                 CHAIN.append(block_dict)
                 incoming_txs = block_dict['transactions_data']
                 incoming_ids = {tx['signature_petani'] for tx in incoming_txs}

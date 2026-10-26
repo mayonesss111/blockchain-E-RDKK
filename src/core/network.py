@@ -3,6 +3,8 @@ import json
 import urllib.request
 import threading
 
+from core.consensus import is_chain_valid
+
 def broadcast_block(block_dict, port, peers):
     def _send():
         for peer in peers:
@@ -26,8 +28,7 @@ def broadcast_tx(tx_dict, peers):
                 pass
     threading.Thread(target=_send).start()
 
-def resolve_conflicts(chain, peers, validator_pub_keys_hex):
-    from consensus import is_chain_valid
+def resolve_conflicts(chain, peers, validator_pub_keys_hex, slot_duration):
     terpanjang = chain
     berubah = False
     for peer in peers:
@@ -35,7 +36,7 @@ def resolve_conflicts(chain, peers, validator_pub_keys_hex):
             req = urllib.request.Request(f"http://{peer}/chain")
             with urllib.request.urlopen(req, timeout=3) as res:
                 kandidat = json.loads(res.read().decode("utf-8"))["chain"]
-                if len(kandidat) >= len(terpanjang) and is_chain_valid(kandidat, validator_pub_keys_hex):
+                if len(kandidat) >= len(terpanjang) and is_chain_valid(kandidat, validator_pub_keys_hex, slot_duration):
                     terpanjang = kandidat
                     berubah = True
         except Exception:
@@ -44,3 +45,19 @@ def resolve_conflicts(chain, peers, validator_pub_keys_hex):
         chain[:] = terpanjang
         return True
     return False
+
+def sync_mempool(local_mempool, peers):
+    """Menarik transaksi dari mempool peer yang aktif jika mempool lokal kosong."""
+    for peer in peers:
+        try:
+            req = urllib.request.Request(f"http://{peer}/mempool")
+            with urllib.request.urlopen(req, timeout=3) as res:
+                data = json.loads(res.read().decode("utf-8"))
+                peer_mempool = data.get("mempool", [])
+                for tx in peer_mempool:
+                    if tx not in local_mempool:
+                        local_mempool.append(tx)
+            if local_mempool:
+                break
+        except Exception:
+            pass

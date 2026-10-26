@@ -1,10 +1,11 @@
-# block.py
 import hashlib
 import json
 import time
 
+# PERBAIKAN: Ubah path import agar seragam
+from core.state import compute_state_root
+
 def compute_merkle_root(transactions):
-    """Menghitung Merkle Root dari sekumpulan transaksi dalam batch blok."""
     if not transactions:
         return hashlib.sha256(b"").hexdigest()
     
@@ -22,9 +23,10 @@ def compute_merkle_root(transactions):
     return layer[0]
 
 class Block:
-    def __init__(self, index, transactions_data, validator_id, previous_hash=None, nonce=0, chain_context=None):
+    # PERBAIKAN: Tambahkan parameter opsional timestamp agar bisa di-blueprint ulang saat validasi
+    def __init__(self, index, transactions_data, validator_id, previous_hash=None, nonce=0, chain_context=None, timestamp=None):
         self.index = index
-        self.timestamp = time.time()
+        self.timestamp = timestamp if timestamp is not None else time.time()
         self.transactions_data = transactions_data
         self.merkle_root = compute_merkle_root(transactions_data)
         self.validator_id = validator_id
@@ -33,7 +35,6 @@ class Block:
         
         self.state_root = "0" * 64
         if chain_context is not None:
-            from core.state import compute_state_root
             temp_chain = chain_context + [self.to_dict_partial()]
             self.state_root = compute_state_root(temp_chain)
             
@@ -69,14 +70,14 @@ class Block:
     def mine_block(self, difficulty):
         target = '0' * difficulty
         attempts = 0
-        start_time = time.time()
-        
+        start_time = time.time() #catat waktu mulai
+
         while self.compute_hash()[:difficulty] != target:
             self.nonce += 1
             attempts += 1
-            
-        end_time = time.time()
-        return attempts, end_time - start_time
+
+        end_time = time.time() #catat waktu selesai
+        return attempts, end_time - start_time # kembalikan dua nilai
 
     def to_dict(self):
         d = self.to_dict_partial()
