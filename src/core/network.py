@@ -2,6 +2,7 @@
 import json
 import urllib.request
 import threading
+import time
 
 from core.consensus import is_chain_valid
 
@@ -43,6 +44,7 @@ def resolve_conflicts(chain, peers, validator_pub_keys_hex, slot_duration):
             pass
     if berubah:
         chain[:] = terpanjang
+        print(f"[SYSTEM] Rantai berhasil diperbarui otomatis ke panjang baru: {len(chain)} blok.")
         return True
     return False
 
@@ -61,3 +63,25 @@ def sync_mempool(local_mempool, peers):
                 break
         except Exception:
             pass
+
+def background_sync_loop(chain, mempool, peers, pub_keys, slot_duration):
+    """Loop otomatis di latar belakang untuk menjaga chain dan mempool tetap update."""
+    def _sync_loop():
+        print("[SYSTEM] Background Sync Thread...")
+        while True:
+            try:
+                if peers:
+                    #1 Otomatis tarik transaksi dari mempool node tetangga jika lokal tertinggal
+                    sync_mempool(mempool, peers)
+
+                    #2 Otomatis cek apakah ada blok baru di node tetangga 
+                    resolve_conflicts(chain, peers, pub_keys, slot_duration)
+
+            except Exception as e:
+                print(f"[SYSTEM] Gagal melakukan background sync: {e}")
+
+            #Lakukan pengecekan otomatis setiap 5 detik
+            time.sleep(5)
+    
+    threading.Thread(target=_sync_loop, daemon=True).start()
+    
