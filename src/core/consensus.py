@@ -1,4 +1,3 @@
-# consensus.py
 from core.block import Block, compute_merkle_root
 from core.state import compute_state_root
 from core.crypto_utils import get_public_key_from_hex
@@ -9,55 +8,74 @@ import time
 VALIDATORS_ORDER = ["VAL_KEMENTAN", "VAL_PT_PUPUK", "VAL_DINAS_PERTANIAN"]
 DIFFICULTY = 3
 
-def get_expected_validator(slot_duration=3):
-    """
-    Menghitung siapa validator yang sah berdasarkan waktu (timestamp) blok dicetak,
-    sehingga fungsi validasi masa lalu tahu apakah sebuah skip-turn sah atau ilegal.
-    """
-    current_slot = int(time.time() // slot_duration)
-    validator_index = current_slot % len(VALIDATORS_ORDER)
+def get_expected_validator(next_index, prev_timestamp, slot_duration):
+    elapsed = time.time() - prev_timestamp
+    turn_offset = int(elapsed // slot_duration)
+    # Urutan bergeser secara alami dari indeks dasar penanda blok sebelumnya
+    validator_index = (next_index + turn_offset) % len(VALIDATORS_ORDER)
     return VALIDATORS_ORDER[validator_index]
 
-def get_validator_at_time(block_timestamp, slot_duration=3):
-    """Menghitung validator sah berdasarkan timestamp historis saat blok dicetak."""
-    block_slot = int(block_timestamp // slot_duration)
-    validator_index = block_slot % len(VALIDATORS_ORDER)
+def get_validator_for_block(curr, prev, slot_duration):
+    elapsed = curr['timestamp'] - prev['timestamp']
+    turn_offset = max(0, int(elapsed // slot_duration))
+    # PERBAIKAN: Rumus disinkronkan dengan penentuan expected_validator utama
+    validator_index = (curr['index'] + turn_offset) % len(VALIDATORS_ORDER)
     return VALIDATORS_ORDER[validator_index]
 
-def is_chain_valid(chain, validator_pub_keys_hex):
+def is_chain_valid(chain, validator_pub_keys_hex, slot_duration):
     if len(chain) == 0:
         return False
     
+    # Hitung batas minimal jeda giliran berdasarkan jumlah validator aktif
+    LIMIT_JEDA = (len(VALIDATORS_ORDER) // 2) + 1
+
     for i in range(1, len(chain)):
         curr = chain[i]
         prev = chain[i - 1]
+
+        start_check = max(0, i - LIMIT_JEDA)
+        for j in range(start_check, i):
+            if chain[j]['validator_id'] == curr['validator_id']:
+                print(f"[CP11] Block #{curr['index']} DITOLAK: Validator {curr['validator_id']} mencoba menerbitkan blok terlalu cepat / berturut-turut!")
+                return False
         
-        b_obj = Block(curr['index'], curr['transactions_data'], curr['validator_id'], curr['previous_hash'], curr['nonce'])
-        b_obj.timestamp = curr['timestamp']
+        # PERBAIKAN: Masukkan timestamp historis langsung ke konstruktor agar nilai hash konsisten
+        b_obj = Block(
+            index=curr['index'], 
+            transactions_data=curr['transactions_data'], 
+            validator_id=curr['validator_id'], 
+            previous_hash=curr['previous_hash'], 
+            nonce=curr['nonce'],
+            timestamp=curr['timestamp']
+        )
         b_obj.merkle_root = curr['merkle_root']
         b_obj.state_root = curr['state_root']
         
-        prev_block_obj = Block(prev['index'], prev['transactions_data'], prev['validator_id'], prev['previous_hash'], prev['nonce'])
-        prev_block_obj.timestamp = prev['timestamp']
+        prev_block_obj = Block(
+            index=prev['index'], 
+            transactions_data=prev['transactions_data'], 
+            validator_id=prev['validator_id'], 
+            previous_hash=prev['previous_hash'], 
+            nonce=prev['nonce'],
+            timestamp=prev['timestamp']
+        )
         prev_block_obj.merkle_root = prev['merkle_root']
         prev_block_obj.state_root = prev['state_root']
         
         if curr['previous_hash'] != prev_block_obj.compute_hash():
+            print(f"[CP11] Block #{curr['index']} DITOLAK: Previous hash tidak cocok!")
             return False
         
-        # Validasi kepenulisan blok berdasarkan timestamp historis blok tersebut
-        expected_val = get_validator_at_time(curr['timestamp'])
-
+        expected_val = get_validator_for_block(curr, prev, slot_duration)
         if curr['validator_id'] != expected_val:
-            print(f"[CP11] Block #{curr['index']} DITOLAK: Validator {curr['validator_id']} tidak sah pada slot waktu tersebut!")
+            print(f"[CP11] Block #{curr['index']} DITOLAK: Validator {curr['validator_id']} tidak sah pada slot ini!")
             return False
             
-        computed_merkle = compute_merkle_root(curr['transactions_data'])
-        if curr['merkle_root'] != computed_merkle:
+        if curr['merkle_root'] != compute_merkle_root(curr['transactions_data']):
+            print(f"[CP11] Block #{curr['index']} DITOLAK: Merkle Root tidak valid!")
             return False
 
-        block_hash = b_obj.compute_hash()
-        if block_hash[:DIFFICULTY] != '0' * DIFFICULTY:
+        if b_obj.compute_hash()[:DIFFICULTY] != '0' * DIFFICULTY:
             print(f"[CP11] Block #{curr['index']} DITOLAK: Proof of Work tidak valid!")
             return False
 
@@ -70,10 +88,11 @@ def is_chain_valid(chain, validator_pub_keys_hex):
         try:
             val_pub_key.verify(sig_val, b_obj.compute_hash().encode('utf-8'), ec.ECDSA(hashes.SHA256()))
         except Exception:
+            print(f"[CP11] Block #{curr['index']} DITOLAK: Tanda tangan validator tidak sah!")
             return False
             
-    expected_state_root = compute_state_root(chain)
-    if chain[-1]['state_root'] != expected_state_root:
+    if chain[-1]['state_root'] != compute_state_root(chain):
+        print("[CP11] Validasi Gagal: State root akhir tidak cocok!")
         return False
 
     print("[CP8] Validasi Rantai: VALID (Semua hash dan previous_hash cocok).")
