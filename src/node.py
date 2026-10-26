@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from core.block import Block
 from core.state import get_state_at_chain, compute_state_root
 from core.consensus import get_expected_validator, is_chain_valid, VALIDATORS_ORDER, DIFFICULTY
-from core.network import broadcast_block, broadcast_tx, resolve_conflicts, sync_mempool
+from core.network import broadcast_block, broadcast_tx, resolve_conflicts, sync_mempool, background_sync_loop
 from core.crypto_utils import get_public_key_from_hex, get_public_key_hex, verify_signature_ecc
 
 PORT = 0
@@ -117,9 +117,6 @@ class NodeHandler(BaseHTTPRequestHandler):
 
         elif self.path == "/mine":
             if not MEMPOOL:
-               sync_mempool(MEMPOOL, PEERS)
-
-            if not MEMPOOL:
                 self._balas(400, {"error": "Mempool kosong, tidak ada transaksi untuk ditambang!"})
                 return
 
@@ -127,6 +124,7 @@ class NodeHandler(BaseHTTPRequestHandler):
             next_index = induk["index"] + 1
             prev_timestamp = induk['timestamp']
 
+            # Pasang filter cegatan locking validator agar tidak menambang beruntun
             LIMIT_JEDA = (len(VALIDATORS_ORDER) // 2) + 1
             start_check = max(0, len(CHAIN) - LIMIT_JEDA)
             
@@ -230,4 +228,7 @@ if __name__ == "__main__":
 
     CHAIN.append(genesis_block().to_dict())
     print(f"Node Validator Aktif di Port {PORT} (Identitas: {NODE_IDENTITY}) dengan Arsitektur Moduler.")
+
+    background_sync_loop(CHAIN, MEMPOOL, PEERS, VALIDATOR_PUB_KEYS_HEX, SLOT_DURATION)
+
     HTTPServer(("0.0.0.0", PORT), NodeHandler).serve_forever()

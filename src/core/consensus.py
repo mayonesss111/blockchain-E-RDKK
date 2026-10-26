@@ -95,5 +95,5 @@ def is_chain_valid(chain, validator_pub_keys_hex, slot_duration):
         print("[CP11] Validasi Gagal: State root akhir tidak cocok!")
         return False
 
-    print("[CP8] Validasi Rantai: VALID (Semua hash dan previous_hash cocok).")
+    #print("[CP8] Validasi Rantai: VALID (Semua hash dan previous_hash cocok).")
     return True
