@@ -165,8 +165,6 @@ class NodeHandler(BaseHTTPRequestHandler):
                 return
 
             CHAIN.append(block_dict)
-            is_chain_valid(CHAIN, VALIDATOR_PUB_KEYS_HEX)
-            
             MEMPOOL.clear()
             
             print(f"[CP7] Blok #{next_index} diterima rantai. Pool dikosongkan. Panjang rantai: {len(CHAIN)}\n")
