@@ -9,6 +9,9 @@ VALIDATORS_ORDER = ["VAL_KEMENTAN", "VAL_PT_PUPUK", "VAL_DINAS_PERTANIAN"]
 DIFFICULTY = 3
 
 def get_expected_validator(next_index, prev_timestamp, slot_duration):
+    if prev_timestamp == 0:
+        return VALIDATORS_ORDER[next_index % len(VALIDATORS_ORDER)]
+
     elapsed = time.time() - prev_timestamp
     turn_offset = int(elapsed // slot_duration)
     # Urutan bergeser secara alami dari indeks dasar penanda blok sebelumnya
@@ -16,6 +19,9 @@ def get_expected_validator(next_index, prev_timestamp, slot_duration):
     return VALIDATORS_ORDER[validator_index]
 
 def get_validator_for_block(curr, prev, slot_duration):
+    if prev['timestamp'] == 0:
+        return VALIDATORS_ORDER[curr['index'] % len(VALIDATORS_ORDER)]
+
     elapsed = curr['timestamp'] - prev['timestamp']
     turn_offset = max(0, int(elapsed // slot_duration))
     # PERBAIKAN: Rumus disinkronkan dengan penentuan expected_validator utama

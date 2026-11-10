@@ -37,7 +37,7 @@ def resolve_conflicts(chain, peers, validator_pub_keys_hex, slot_duration):
             req = urllib.request.Request(f"http://{peer}/chain")
             with urllib.request.urlopen(req, timeout=3) as res:
                 kandidat = json.loads(res.read().decode("utf-8"))["chain"]
-                if len(kandidat) >= len(terpanjang) and is_chain_valid(kandidat, validator_pub_keys_hex, slot_duration):
+                if len(kandidat) > len(terpanjang) and is_chain_valid(kandidat, validator_pub_keys_hex, slot_duration):
                     terpanjang = kandidat
                     berubah = True
         except Exception:
