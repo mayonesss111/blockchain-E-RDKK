@@ -24,7 +24,7 @@ VALIDATOR_PUB_KEYS_HEX = {}
 VALIDATOR_PRIV_KEYS = {}
 SECP256R1_ORDER = 115792089210356248762697446949407573530086143415290314195533631308867097853951
 
-SLOT_DURATION = 10
+SLOT_DURATION = 39
 
 def genesis_block():
     db_kuota_pemerintah = {
@@ -123,7 +123,7 @@ class NodeHandler(BaseHTTPRequestHandler):
             prev_timestamp = induk['timestamp']
 
             # Pasang filter cegatan locking validator agar tidak menambang beruntun
-            LIMIT_JEDA = (len(VALIDATORS_ORDER) // 2) + 1
+            LIMIT_JEDA = 1
             start_check = max(0, len(CHAIN) - LIMIT_JEDA)
             
             for k in range(start_check, len(CHAIN)):

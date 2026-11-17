@@ -110,6 +110,9 @@ if __name__ == "__main__":
             print(f"Sukses! {hasil['pesan']} pada Blok #{hasil['block']['index']} (Validator: {hasil['block']['validator_id']})")
             print(f"Merkle Root : {hasil['block']['merkle_root']}")
             print(f"State Root  : {hasil['block']['state_root']}")
+        except urllib.error.HTTPError as e:
+            err_body = json.loads(e.read().decode("utf-8"))
+            print(f"Gagal Menambang (HTTP {e.code}): {err_body.get('error', err_body)}")
         except Exception as e:
             print(f"Gagal Menambang Blok dari Mempool: {e}")
 

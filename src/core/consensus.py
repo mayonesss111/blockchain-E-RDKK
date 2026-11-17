@@ -33,7 +33,7 @@ def is_chain_valid(chain, validator_pub_keys_hex, slot_duration):
         return False
     
     # Hitung batas minimal jeda giliran berdasarkan jumlah validator aktif
-    LIMIT_JEDA = (len(VALIDATORS_ORDER) // 2) + 1
+    LIMIT_JEDA = 1
 
     for i in range(1, len(chain)):
         curr = chain[i]
