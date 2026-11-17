@@ -12,7 +12,7 @@ def get_expected_validator(next_index, prev_timestamp, slot_duration):
     if prev_timestamp == 0:
         return VALIDATORS_ORDER[next_index % len(VALIDATORS_ORDER)]
 
-    elapsed = time.time() - prev_timestamp
+    elapsed = max(0, time.time() - prev_timestamp)
     turn_offset = int(elapsed // slot_duration)
     # Urutan bergeser secara alami dari indeks dasar penanda blok sebelumnya
     validator_index = (next_index + turn_offset) % len(VALIDATORS_ORDER)

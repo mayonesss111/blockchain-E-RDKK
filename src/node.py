@@ -12,6 +12,7 @@ from core.state import get_state_at_chain, compute_state_root
 from core.consensus import get_expected_validator, is_chain_valid, VALIDATORS_ORDER, DIFFICULTY
 from core.network import broadcast_block, broadcast_tx, resolve_conflicts, sync_mempool, background_sync_loop
 from core.crypto_utils import get_public_key_from_hex, get_public_key_hex, verify_signature_ecc
+from core.smart_contract import SmartContractERDK
 
 PORT = 0
 PEERS = []
@@ -90,13 +91,10 @@ class NodeHandler(BaseHTTPRequestHandler):
                 return
 
             simulated_state = get_simulated_state_with_mempool()
-            if nik not in simulated_state:
-                self._balas(400, {"error": "NIK Petani tidak terdaftar di sistem kuota subsidi!"})
-                return
-            
-            sisa_kuota = simulated_state[nik]['sisa_kuota_kg']
-            if jumlah_diminta > sisa_kuota:
-                self._balas(400, {"error": f"Ditolak! Kuota tidak cukup di mempool. Sisa: {sisa_kuota} kg"})
+            is_valid_contract, pesan_kontrak = SmartContractERDK.validasi_aturan_bisnis(tx_data, simulated_state)
+
+            if not is_valid_contract:
+                self._balas(400, {"error": pesan_kontrak})
                 return
 
             payload_str = f"{nik}:{jumlah_diminta}:{tx_data['kios_id']}:{tx_data['timestamp']}"
