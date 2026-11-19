@@ -118,12 +118,54 @@ if __name__ == "__main__":
 
     elif perintah == "chain":
         try:
+            from datetime import datetime
             hasil = panggil(f"{alamat}/chain")
-            print(f"Panjang Rantai e-RDKK: {hasil['panjang']} Blok | Mempool Aktif: {hasil.get('mempool_size', 0)} transaksi")
+            panjang = hasil['panjang']
+            mempool_count = hasil.get('mempool_size', 0)
+
+            print("\n" + "═" * 70)
+            print(f" 📦 LEDGER BLOCKCHAIN E-RDKK | Total: {panjang} Blok | Mempool: {mempool_count} Tx")
+            print("═" * 70)
+
             for b in hasil["chain"]:
-                print(f"  - Blok #{b['index']} | Validator: {b['validator_id']} | Transaksi: {b['transactions_data']}")
+                idx = b['index']
+                val = b['validator_id']
+                nonce = b['nonce']
+                prev_hash = b['previous_hash'][:16] + "..." if b['previous_hash'] else "None"
+                merkle = b['merkle_root'][:16] + "..."
+                state_r = b['state_root'][:16] + "..."
+                
+                # Ubah format timestamp menjadi waktu yang mudah dibaca
+                if b['timestamp'] == 0:
+                    waktu_str = "Genesis (Awal Sistem)"
+                else:
+                    waktu_str = datetime.fromtimestamp(b['timestamp']).strftime('%Y-%m-%d %H:%M:%S')
+
+                print(f"┌─ BLOK #{idx} " + "─" * (59 - len(str(idx))))
+                print(f"│ Validator     : {val}")
+                print(f"│ Waktu (WITA)  : {waktu_str}")
+                print(f"│ Nonce (PoW)   : {nonce}")
+                print(f"│ Previous Hash : {prev_hash}")
+                print(f"│ Merkle Root   : {merkle}")
+                print(f"│ State Root    : {state_r}")
+                print(f"│ Data Transaksi:")
+
+                txs = b['transactions_data']
+                if idx == 0:
+                    # Tampilan khusus untuk data alokasi kuota awal di Genesis Block
+                    for nik, info in txs[0].items():
+                        print(f"│   • [Alokasi Awal] NIK {nik} ({info['nama']}): {info['sisa_kuota_kg']} kg")
+                else:
+                    if not txs:
+                        print("│   • (Tidak ada transaksi)")
+                    for i, tx in enumerate(txs, 1):
+                        print(f"│   {i}. NIK: {tx['nik_petani']} | Tebus: {tx['jumlah_kg']} kg | Kios: {tx['kios_id']}")
+                
+                print("└" + "─" * 68)
+            print()
         except Exception as e:
             print(f"Gagal mengambil rantai: {e}")
+
 
     elif perintah == "resolve":
         try:

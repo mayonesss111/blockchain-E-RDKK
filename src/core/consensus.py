@@ -7,6 +7,7 @@ import time
 
 VALIDATORS_ORDER = ["VAL_KEMENTAN", "VAL_PT_PUPUK", "VAL_DINAS_PERTANIAN"]
 DIFFICULTY = 3
+MAX_FUTURE_DRIFT = 5
 
 def get_expected_validator(next_index, prev_timestamp, slot_duration):
     if prev_timestamp == 0:
@@ -71,6 +72,14 @@ def is_chain_valid(chain, validator_pub_keys_hex, slot_duration):
         if curr['previous_hash'] != prev_block_obj.compute_hash():
             print(f"[CP11] Block #{curr['index']} DITOLAK: Previous hash tidak cocok!")
             return False
+
+        if curr['timestamp'] < prev['timestamp']:
+                print(f"[CP11] Block #{curr['index']} DITOLAK: Timestamp mundur dari blok induk!")
+                return False
+
+        if curr['timestamp'] > time.time() + MAX_FUTURE_DRIFT:
+                print(f"[CP11] Block #{curr['index']} DITOLAK: Timestamp lebih dari {MAX_FUTURE_DRIFT}s di masa depan!")
+                return False
         
         expected_val = get_validator_for_block(curr, prev, slot_duration)
         if curr['validator_id'] != expected_val:
@@ -101,5 +110,5 @@ def is_chain_valid(chain, validator_pub_keys_hex, slot_duration):
         print("[CP11] Validasi Gagal: State root akhir tidak cocok!")
         return False
 
-    #print("[CP8] Validasi Rantai: VALID (Semua hash dan previous_hash cocok).")
+    print("[CP8] Validasi Rantai: VALID (Semua hash dan previous_hash cocok).")
     return True
